@@ -186,9 +186,11 @@
     App.flush();
   };
 
-  var flushing = false;
+  var flushing = false, flushPromise = null;
   App.flush = function () {
-    if (flushing || !state.conn || state.conn.demo || !state.me) return Promise.resolve();
+    // 同期の最中に呼ばれたら、すぐ終わらせず今の同期の完了を待つ(古い結果で判断しないように)
+    if (flushing) return flushPromise;
+    if (!state.conn || state.conn.demo || !state.me) return Promise.resolve();
     flushing = true;
     setSync('busy');
     function step() {
@@ -218,13 +220,23 @@
         return step();
       });
     }
-    return step().catch(function (e) {
+    flushPromise = step().catch(function (e) {
       setSync('off');
       if (e.auth) App.toast('接続コードが無効です。設定から入れ直してください', true);
     }).then(function () {
       flushing = false;
       // 同期中に積まれた操作があれば続けて送る(通信失敗のときは繰り返さない)
-      if (state.outbox.length && state.sync !== 'off') App.flush();
+      if (state.outbox.length && state.sync !== 'off') return App.flush();
+    });
+    return flushPromise;
+  };
+  /** 送信キューを送り切ってから、サーバーに直接最新の状態を問い合わせる。通信できなければ例外。 */
+  App.fetchLatest = function () {
+    return App.flush().then(function () {
+      return withIdentity(function () { return api('getData'); });
+    }).then(function (data) {
+      if (!state.outbox.length) { state.data = normalize(data); App.persist(); }
+      return data;
     });
   };
 

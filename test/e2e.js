@@ -282,6 +282,43 @@ async function runDrill(page, mode) {
         await B.page.waitForFunction(() => document.getElementById('toast').textContent.includes('承認者として認識'));
         assert.match(await text(B.page), /承認者: はい/);
       });
+      await step('B: 応答が遅く同期の最中でも、合言葉を正しく判定する(本番で起きた不具合の再発防止)', async () => {
+        const toast = () => B.page.evaluate(() => document.getElementById('toast').textContent);
+        const clearToast = () => B.page.evaluate(() => { document.getElementById('toast').textContent = ''; });
+        const waitToast = (re) => B.page.waitForFunction((s) => new RegExp(s).test(document.getElementById('toast').textContent), re.source, { timeout: 15000 });
+        await B.page.click('[data-act=admin-clear]');
+        await B.page.waitForFunction(() => document.getElementById('toast').textContent.includes('解除しました'));
+        srv.ctl.delayMs = 1200; // 本物の Apps Script のように遅くする
+        try {
+          // 正しい合言葉: スプレッドシートからアプリに戻った瞬間の自動同期の最中に押す
+          await B.page.evaluate(() => { window.App.flush(); });
+          await B.page.fill('#adminkey', srv.adminKey);
+          await clearToast();
+          await B.page.click('[data-act=admin-save]');
+          await waitToast(/承認者として認識|合言葉が違う/);
+          assert.match(await toast(), /承認者として認識/);
+          assert.ok(await B.page.evaluate(() => window.App.state.admin), '合言葉が残っている');
+          // 間違った合言葉: 同じ条件でも「違う」と判定し、保存しない
+          await B.page.evaluate(() => { window.App.state.admin = ''; window.App.flush(); });
+          await B.page.fill('#adminkey', 'まちがい');
+          await clearToast();
+          await B.page.click('[data-act=admin-save]');
+          await waitToast(/承認者として認識|合言葉が違う/);
+          assert.match(await toast(), /合言葉が違う/);
+          assert.equal(await B.page.evaluate(() => window.App.state.admin), '');
+        } finally { srv.ctl.delayMs = 0; }
+        // 圏外: 「違う」とは言わず、合言葉は残す
+        await B.ctx.setOffline(true);
+        await B.page.fill('#adminkey', srv.adminKey);
+        await clearToast();
+        await B.page.click('[data-act=admin-save]');
+        await waitToast(/つながりませんでした|合言葉が違う|承認者として認識/);
+        assert.match(await toast(), /つながりませんでした/);
+        assert.equal(await B.page.evaluate(() => window.App.state.admin), srv.adminKey);
+        await B.ctx.setOffline(false);
+        await B.page.evaluate(() => window.App.fetchLatest());
+        assert.match(await text(B.page), /承認者: はい/);
+      });
       await step('B: 承認待ちが見え、差し戻し(コメント付き)→A に届く', async () => {
         await tab(B.page, 'cases');
         assert.match(await text(B.page), /承認待ちが 1件/);

@@ -24,16 +24,20 @@ function start(port, opts) {
   const gas = createGas({ file: path.join(gasDir, 'code.js') });
   gas.doGet();
   const log = [];
+  const ctl = { delayMs: Number(process.env.API_DELAY_MS || 0) };
   const server = http.createServer((req, res) => {
     if (req.url === '/api' && req.method === 'POST') {
       let body = '';
       req.on('data', (d) => { body += d; });
       req.on('end', () => {
         if (opts.offline && opts.offline()) { res.writeHead(503); res.end('offline'); return; }
-        const out = gas.api.doPost({ postData: { contents: body } });
-        try { log.push(JSON.parse(body).action); } catch (e) { /* 無視 */ }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(out.getContent());
+        // 本物の Apps Script のように応答を遅らせる(state.delayMs ミリ秒)
+        setTimeout(() => {
+          const out = gas.api.doPost({ postData: { contents: body } });
+          try { log.push(JSON.parse(body).action); } catch (e) { /* 無視 */ }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(out.getContent());
+        }, ctl.delayMs);
       });
       return;
     }
@@ -53,7 +57,7 @@ function start(port, opts) {
       const origin = 'http://127.0.0.1:' + actual;
       // 接続コード(URL は /api に差し替える)
       const code = Buffer.from(JSON.stringify({ u: origin + '/api', k: gas.props.API_KEY }), 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-      resolve({ server, gas, origin, code, adminKey: gas.props.ADMIN_KEY, log, close: () => new Promise((r) => server.close(r)) });
+      resolve({ server, gas, ctl, origin, code, adminKey: gas.props.ADMIN_KEY, log, close: () => new Promise((r) => server.close(r)) });
     });
   });
 }

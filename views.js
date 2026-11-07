@@ -428,12 +428,19 @@
   A['admin-save'] = function () {
     var v = $('#adminkey').value.trim();
     if (!v) { App.toast('合言葉を入力してください', true); return; }
+    var btn = $('[data-act=admin-save]');
+    if (btn) { btn.disabled = true; btn.textContent = '確認中…'; }
     state.admin = v; App.save(App.LS.admin, v);
-    App.flush().then(function () {
-      var ok = !!(state.data.me && state.data.me.admin);
-      App.toast(ok ? '承認者として認識されました' : '合言葉が違うようです', !ok);
+    // 同期の結果ではなく、サーバーに直接問い合わせて判定する
+    App.fetchLatest().then(function (data) {
+      var ok = !!(data.me && data.me.admin);
       if (!ok) { state.admin = ''; App.save(App.LS.admin, ''); }
       App.render();
+      App.toast(ok ? '承認者として認識されました' : '合言葉が違うようです。「設定」シートの B3 をもう一度コピーしてください', !ok);
+    }, function (e) {
+      // 通信できなかっただけなら、合言葉は消さずに残す(つながったときに有効になる)
+      App.render();
+      App.toast(e.network ? 'つながりませんでした。合言葉は保存したので、電波のよい所で「今すぐ同期」を押してください' : e.message, true);
     });
   };
   A['admin-clear'] = function () {

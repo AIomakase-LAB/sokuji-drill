@@ -2,7 +2,7 @@
 // データ通信(script.google.com など別オリジン)には関与しない。
 // プロトコール本文は端末に保存しない(このアプリは取り扱わない)。
 // 画面を更新したら CACHE のバージョンを上げる(version.js も合わせる)。
-const CACHE = 'sokuji-v0.1.0';
+const CACHE = 'sokuji-v0.1.1';
 const SHELL = ['./', 'index.html', 'style.css', 'logic.js', 'samples.js', 'version.js', 'core.js', 'drill.js', 'views.js', 'main.js',
   'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
