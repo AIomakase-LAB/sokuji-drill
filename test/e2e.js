@@ -161,9 +161,10 @@ async function runDrill(page, mode) {
         await p.waitForSelector('.sc[data-act=start]');
         await p.click('[data-act=time][data-v="10"]');
       });
-      await step('症例を作る: 空のままでは保存できず、入力すれば下書きで保存', async () => {
+      await step('症例を作る: 空のままでは保存できず、入力して保存するとすぐ訓練に出る', async () => {
         await tab(p, 'cases');
         await p.click('[data-act=case-new]');
+        assert.equal(await p.locator('[data-act=ed-submit]').count(), 0, 'レビューに出すボタンはない');
         await p.click('[data-act=ed-save]');
         assert.match(await text(p), /title がありません/);
         await p.fill('input[data-f=title]', '手書きの症例');
@@ -177,20 +178,26 @@ async function runDrill(page, mode) {
           await p.fill('details.stg >> nth=' + i + ' >> textarea[data-o="2"]', '');
         }
         await shot(p, '05-editor');
-        await p.click('[data-act=ed-save]');
+        await p.click('[data-act=ed-save]'); // 見直しの目安の確認(自動で OK)
+        assert.match(p.dialogs.pop(), /すぐに全員の訓練に出ます/);
         await p.waitForSelector('.sc[data-act=case-open]');
-        assert.match(await text(p), /手書きの症例/);
-        assert.match(await text(p), /下書き/);
-      });
-      await step('デモは承認者として全操作を試せる: レビュー→承認→ホームに出る', async () => {
-        await p.click('.sc[data-act=case-open]');
-        await p.click('[data-act=case-submit]');   // 見直し目安の確認ダイアログ(自動で OK)
-        await p.waitForSelector('.tag.st-review');
-        await p.click('.sc[data-act=case-open]');
-        await p.click('[data-act=case-approve]');
+        const t = await text(p);
+        assert.match(t, /手書きの症例/);
+        assert.doesNotMatch(t, /下書き|レビュー待ち|承認/);
         await tab(p, 'home');
         assert.match(await text(p), /手書きの症例/);
         assert.equal(await p.locator('.sc[data-act=start]').count(), 4);
+      });
+      await step('自分の症例は編集でき、承認の操作はどこにもない', async () => {
+        await tab(p, 'cases');
+        await p.click('.sc[data-act=case-open]');
+        assert.equal(await p.locator('[data-act=case-edit]').count(), 1);
+        assert.equal(await p.locator('[data-act=case-delete]').count(), 1);
+        for (const act of ['case-submit', 'case-approve', 'case-reject', 'case-unpublish']) assert.equal(await p.locator('[data-act=' + act + ']').count(), 0, act);
+        await p.click('[data-act=close-layer]');
+        await tab(p, 'settings');
+        assert.doesNotMatch(await text(p), /合言葉|承認者/);
+        assert.equal(await p.locator('#adminkey').count(), 0);
       });
       await step('JSON取込: 個人情報らしき記述は警告し、拒否すれば取り込まない', async () => {
         await tab(p, 'cases');
@@ -237,125 +244,78 @@ async function runDrill(page, mode) {
     }
 
     // ===================== 共有データに接続(承認フロー・複数端末・オフライン) =====================
-    console.log('[共有データ: 作成者→承認者→隊員]');
+    console.log('[共有データ: 作った症例がすぐ全員に出る]');
     const A = await newDevice(browser, srv, 'A作成者');
-    const B = await newDevice(browser, srv, 'B承認者');
+    const B = await newDevice(browser, srv, 'B隊員');
     const C = await newDevice(browser, srv, 'C隊員');
     let transferCode;
     try {
       await step('3台がそれぞれニックネームで接続できる', async () => {
         await connect(A.page, srv, '作成者A');
-        await connect(B.page, srv, '指導者B');
+        await connect(B.page, srv, '隊員B');
         await connect(C.page, srv, '隊員C');
         const rows = srv.gas.sheet('プロフィール')._dump();
         assert.equal(rows.length, 4);
         assert.ok(!JSON.stringify(rows).includes(await C.page.evaluate(() => window.App.state.me.tok)), 'トークンの平文は保存されない');
       });
-      await step('A: JSON取込で下書きを作り、レビューに出す', async () => {
+      await step('A: JSON取込 → すぐに C のホームに出る(承認待ちはない)', async () => {
         await tab(A.page, 'cases');
         await A.page.click('[data-act=case-import]');
         await A.page.fill('#jsonin', JSON.stringify([mkCase('胸痛(70代男性)')]));
         await A.page.click('[data-act=import-do]');
         await waitSync(A.page);
         await A.page.waitForSelector('.sc[data-act=case-open]');
-        await A.page.click('.sc[data-act=case-open]');
-        await shot(A.page, '06-case-detail');
-        await A.page.click('[data-act=case-submit]');
-        await waitSync(A.page);
-        await A.page.waitForSelector('.tag.st-review');
-      });
-      await step('C(一般隊員)にはレビュー中の症例は見えず、訓練にも出ない', async () => {
-        await C.page.evaluate(() => window.App.flush());
-        await tab(C.page, 'cases');
-        assert.doesNotMatch(await text(C.page), /胸痛\(70代男性\)/);
-        await tab(C.page, 'home');
-        assert.equal(await C.page.locator('.sc[data-act=start]').count(), 3, 'サンプルだけ');
-      });
-      await step('B: 合言葉を入力して承認者になれる。間違った合言葉は拒否', async () => {
-        await tab(B.page, 'settings');
-        await B.page.fill('#adminkey', 'まちがい');
-        await B.page.click('[data-act=admin-save]');
-        await B.page.waitForFunction(() => document.getElementById('toast').textContent.includes('合言葉が違う'));
-        assert.equal(await B.page.evaluate(() => window.App.state.admin), '', '間違った合言葉は保存しない');
-        await B.page.fill('#adminkey', srv.adminKey);
-        await B.page.click('[data-act=admin-save]');
-        await B.page.waitForFunction(() => document.getElementById('toast').textContent.includes('承認者として認識'));
-        assert.match(await text(B.page), /承認者: はい/);
-      });
-      await step('B: 応答が遅く同期の最中でも、合言葉を正しく判定する(本番で起きた不具合の再発防止)', async () => {
-        const toast = () => B.page.evaluate(() => document.getElementById('toast').textContent);
-        const clearToast = () => B.page.evaluate(() => { document.getElementById('toast').textContent = ''; });
-        const waitToast = (re) => B.page.waitForFunction((s) => new RegExp(s).test(document.getElementById('toast').textContent), re.source, { timeout: 15000 });
-        await B.page.click('[data-act=admin-clear]');
-        await B.page.waitForFunction(() => document.getElementById('toast').textContent.includes('解除しました'));
-        srv.ctl.delayMs = 1200; // 本物の Apps Script のように遅くする
-        try {
-          // 正しい合言葉: スプレッドシートからアプリに戻った瞬間の自動同期の最中に押す
-          await B.page.evaluate(() => { window.App.flush(); });
-          await B.page.fill('#adminkey', srv.adminKey);
-          await clearToast();
-          await B.page.click('[data-act=admin-save]');
-          await waitToast(/承認者として認識|合言葉が違う/);
-          assert.match(await toast(), /承認者として認識/);
-          assert.ok(await B.page.evaluate(() => window.App.state.admin), '合言葉が残っている');
-          // 間違った合言葉: 同じ条件でも「違う」と判定し、保存しない
-          await B.page.evaluate(() => { window.App.state.admin = ''; window.App.flush(); });
-          await B.page.fill('#adminkey', 'まちがい');
-          await clearToast();
-          await B.page.click('[data-act=admin-save]');
-          await waitToast(/承認者として認識|合言葉が違う/);
-          assert.match(await toast(), /合言葉が違う/);
-          assert.equal(await B.page.evaluate(() => window.App.state.admin), '');
-        } finally { srv.ctl.delayMs = 0; }
-        // 圏外: 「違う」とは言わず、合言葉は残す
-        await B.ctx.setOffline(true);
-        await B.page.fill('#adminkey', srv.adminKey);
-        await clearToast();
-        await B.page.click('[data-act=admin-save]');
-        await waitToast(/つながりませんでした|合言葉が違う|承認者として認識/);
-        assert.match(await toast(), /つながりませんでした/);
-        assert.equal(await B.page.evaluate(() => window.App.state.admin), srv.adminKey);
-        await B.ctx.setOffline(false);
-        await B.page.evaluate(() => window.App.fetchLatest());
-        assert.match(await text(B.page), /承認者: はい/);
-      });
-      await step('B: 承認待ちが見え、差し戻し(コメント付き)→A に届く', async () => {
-        await tab(B.page, 'cases');
-        assert.match(await text(B.page), /承認待ちが 1件/);
-        await B.page.click('.sc[data-act=case-open]');
-        B.page.promptText = '場面3の根拠項番を確認してください';
-        await B.page.click('[data-act=case-reject]');
-        await waitSync(B.page);
-        await A.page.evaluate(() => window.App.flush());
-        await tab(A.page, 'cases');
-        await A.page.waitForSelector('.tag.st-draft');
-        assert.match(await text(A.page), /差し戻しあり/);
-        await A.page.click('.sc[data-act=case-open]');
-        assert.match(await text(A.page), /差し戻しコメント: 場面3の根拠項番を確認してください/);
-        await shot(A.page, '07-rejected');
-      });
-      await step('A: 直して再提出 → B が承認 → C のホームに出る', async () => {
-        await A.page.click('[data-act=case-submit]');
-        await waitSync(A.page);
-        await B.page.evaluate(() => window.App.flush());
-        await tab(B.page, 'cases');
-        await B.page.click('.sc[data-act=case-open]');
-        await B.page.click('[data-act=case-approve]');
-        await waitSync(B.page);
         await C.page.evaluate(() => window.App.flush());
         await tab(C.page, 'home');
         await C.page.waitForSelector('.sc[data-act=start]:has-text("胸痛(70代男性)")');
         assert.equal(await C.page.locator('.sc[data-act=start]').count(), 4);
+        await shot(C.page, '06-home-shared');
       });
-      await step('A: 承認済みの症例は作成者でも編集・削除できない(複製は可能)', async () => {
+      await step('B: A の症例は編集・削除できず、複製すれば自分の症例として直せる', async () => {
+        await B.page.evaluate(() => window.App.flush());
+        await tab(B.page, 'cases');
+        await B.page.click('.sc[data-act=case-open]:has-text("胸痛(70代男性)")');
+        assert.equal(await B.page.locator('[data-act=case-edit]').count(), 0);
+        assert.equal(await B.page.locator('[data-act=case-delete]').count(), 0);
+        assert.match(await text(B.page), /作成者Aさんの症例です/);
+        await shot(B.page, '07-case-detail-other');
+        await B.page.click('[data-act=case-dup]');
+        await B.page.fill('input[data-f=title]', '胸痛(Bの派生)');
+        await B.page.click('[data-act=ed-save]');
+        await waitSync(B.page);
+        const rows = srv.gas.sheet('症例')._dump();
+        assert.equal(rows.length, 3);
+        assert.ok(rows.some((r) => r.includes('胸痛(Bの派生)') && r.includes('隊員B')));
+        assert.ok(rows.some((r) => r.includes('胸痛(70代男性)') && r.includes('作成者A')), 'A の症例はそのまま');
+      });
+      await step('A: 自分の症例を直すと、C にも反映される', async () => {
         await A.page.evaluate(() => window.App.flush());
         await tab(A.page, 'cases');
-        await A.page.click('.sc[data-act=case-open]');
-        assert.equal(await A.page.locator('[data-act=case-edit]').count(), 0);
-        assert.equal(await A.page.locator('[data-act=case-delete]').count(), 0);
-        assert.equal(await A.page.locator('[data-act=case-dup]').count(), 1);
+        await A.page.click('.sc[data-act=case-open]:has-text("胸痛(70代男性)")');
+        await A.page.click('[data-act=case-edit]');
+        await A.page.evaluate(() => { document.querySelectorAll('details.stg')[0].open = true; });
+        await A.page.fill('details.stg >> nth=0 >> textarea[data-f=info]', '修正した指令内容');
+        await A.page.click('[data-act=ed-save]');
+        await waitSync(A.page);
+        await C.page.evaluate(() => window.App.flush());
+        const c = await C.page.evaluate(() => window.App.state.data.cases.find((x) => x.title === '胸痛(70代男性)'));
+        assert.equal(c.stages[0].info, '修正した指令内容');
+        assert.equal(c.version, 2);
       });
-      await step('C: 承認済み症例を完走 → サーバーに保存される', async () => {
+      await step('同期の最中に保存しても、送信が抜け落ちない(応答が遅いとき)', async () => {
+        srv.ctl.delayMs = 1000;
+        try {
+          await B.page.evaluate(() => { window.App.flush(); });
+          await tab(B.page, 'cases');
+          await B.page.click('.sc[data-act=case-open]:has-text("胸痛(Bの派生)")');
+          await B.page.click('[data-act=case-edit]');
+          await B.page.fill('input[data-f=title]', '胸痛(Bの派生2)');
+          await B.page.click('[data-act=ed-save]');
+          await waitSync(B.page);
+        } finally { srv.ctl.delayMs = 0; }
+        assert.ok(srv.gas.sheet('症例')._dump().some((r) => r.includes('胸痛(Bの派生2)')));
+      });
+      await step('C: A の症例を完走 → サーバーに保存される', async () => {
         await C.page.click('.sc[data-act=start]:has-text("胸痛(70代男性)")');
         await runDrill(C.page, 'correct');
         await waitSync(C.page);
@@ -441,6 +401,14 @@ async function runDrill(page, mode) {
         await C.page.click('[data-act=del-session]');
         await waitSync(C.page);
         assert.equal(srv.gas.sheet('セッション')._dump().length, 3);
+      });
+      await step('B: 自分の症例を削除すると、C からも消える', async () => {
+        await tab(B.page, 'cases');
+        await B.page.click('.sc[data-act=case-open]:has-text("胸痛(Bの派生2)")');
+        await B.page.click('[data-act=case-delete]');
+        await waitSync(B.page);
+        await C.page.evaluate(() => window.App.flush());
+        assert.equal(await C.page.evaluate(() => window.App.state.data.cases.some((x) => /Bの派生/.test(x.title))), false);
       });
       await step('サーバーのシートが空でも、端末が自動で再登録して復旧する', async () => {
         // 作成者A(2行目)のプロフィールを消す → identity エラー → 同じ端末ID・トークンで再登録 → 続行

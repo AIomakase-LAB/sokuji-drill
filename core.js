@@ -7,11 +7,12 @@
   'use strict';
   var SD = window.SD;
 
-  var LS = { conn: 'sd_conn', me: 'sd_me', admin: 'sd_admin', data: 'sd_data', outbox: 'sd_outbox', settings: 'sd_settings', demo: 'sd_demo' };
+  var LS = { conn: 'sd_conn', me: 'sd_me', data: 'sd_data', outbox: 'sd_outbox', settings: 'sd_settings', demo: 'sd_demo' };
   function load(k, fb) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : fb; } catch (e) { return fb; } }
   function save(k, v) { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* 容量超過などは無視 */ } }
 
   var App = window.App = { LS: LS, load: load, save: save, views: {}, acts: {} };
+  save('sd_admin', null); // 以前の版の「承認者の合言葉」を端末から消す(承認の仕組みはなくした)
 
   function normalize(d) {
     d = d || {};
@@ -21,7 +22,6 @@
   var state = App.state = {
     conn: load(LS.conn, null),          // {u,k} | {demo:true} | null
     me: load(LS.me, null),              // {uid,tok,nick}
-    admin: load(LS.admin, ''),          // 承認者の合言葉(この端末だけに保存)
     data: normalize(load(LS.data, null)),
     outbox: load(LS.outbox, []),
     settings: Object.assign({ time: 10, mode: 'choice', tag: '', diff: 0, goals: { weekly: 3, avgSec: 8 } }, load(LS.settings, {})),
@@ -72,16 +72,16 @@
 
   // ---------- 症例の見え方 ----------
   App.isDemo = function () { return !!(state.conn && state.conn.demo); };
-  App.isAdmin = function () { return App.isDemo() || !!(state.data.me && state.data.me.admin); };
   App.myUid = function () { return state.me ? state.me.uid : ''; };
-  /** サンプル(同梱) + サーバーの症例。サンプルは承認済み扱いで、編集・削除はできない。 */
+  /** サンプル(同梱) + サーバーの症例。サンプルは編集・削除できない(複製はできる)。 */
   App.allCases = function () {
     var samples = (window.SD_SAMPLES || []).map(function (c) {
       return Object.assign({}, c, { status: 'approved', source: 'sample', mine: false, version: 1, authorName: 'サンプル' });
     });
     return samples.concat(state.data.cases);
   };
-  App.drillable = function () { return App.allCases().filter(function (c) { return c.status === 'approved'; }); };
+  // 承認の仕組みはないので、保存された症例はすべて訓練に出る
+  App.drillable = function () { return App.allCases(); };
   App.findCase = function (id) { return App.allCases().filter(function (c) { return c.id === id; })[0] || null; };
   App.sessionsAsc = function () {
     return state.data.sessions.slice().sort(function (a, b) { return a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0; });
@@ -92,7 +92,6 @@
   function api(action, payload) {
     var c = state.conn;
     var body = { key: c.k, uid: state.me && state.me.uid, tok: state.me && state.me.tok, action: action, payload: payload || {} };
-    if (state.admin) body.admin = state.admin;
     // 本文は文字列のまま送る(Content-Type が text/plain になり、事前確認の通信が要らない)
     return fetch(c.u, { method: 'POST', body: JSON.stringify(body), redirect: 'follow' }).then(function (r) {
       if (!r.ok) throw netError('HTTP ' + r.status);
@@ -147,28 +146,18 @@
       d.sessions = d.sessions.filter(function (s) { return s.id !== p.id; });
     } else if (action === 'saveCase') {
       var old = cs.filter(function (c) { return c.id === p.case.id; })[0];
-      var mine = !old || old.authorId === uid;
-      var status = p.submit ? 'review' : (old && App.isAdmin() && !mine ? old.status : (old && old.status === 'approved' ? 'approved' : 'draft'));
       upsert(cs, caseRow(p.case, {
-        status: status, version: old ? (old.version || 1) + 1 : 1, source: old ? old.source : 'manual',
-        authorId: old ? old.authorId : uid, authorName: old ? old.authorName : nick, mine: mine,
-        reviewNote: p.submit || !old ? '' : old.reviewNote || '', createdAt: old ? old.createdAt : now, updatedAt: now, publishedAt: old ? old.publishedAt : ''
+        status: 'approved', version: old ? (old.version || 1) + 1 : 1, source: old ? old.source : 'manual',
+        authorId: old ? old.authorId : uid, authorName: old ? old.authorName : nick, mine: true,
+        reviewNote: '', createdAt: old ? old.createdAt : now, updatedAt: now, publishedAt: old ? old.publishedAt : now
       }));
-    } else if (action === 'reviewCase') {
-      cs.forEach(function (c) {
-        if (c.id !== p.id) return;
-        if (p.decision === 'approve') { c.status = 'approved'; c.publishedAt = now; c.reviewNote = ''; }
-        else if (p.decision === 'reject') { c.status = 'draft'; c.reviewNote = p.note; }
-        else if (p.decision === 'unpublish') { c.status = 'draft'; c.publishedAt = ''; c.reviewNote = p.note || ''; }
-        c.version = (c.version || 1) + 1; c.updatedAt = now;
-      });
     } else if (action === 'deleteCase') {
       d.cases = cs.filter(function (c) { return c.id !== p.id; });
     } else if (action === 'importCases') {
       p.cases.forEach(function (c) {
         upsert(cs, caseRow(c, {
-          status: p.approved && App.isAdmin() ? 'approved' : 'draft', version: 1, source: 'import', authorId: uid, authorName: nick, mine: true,
-          reviewNote: '', createdAt: now, updatedAt: now, publishedAt: p.approved && App.isAdmin() ? now : ''
+          status: 'approved', version: 1, source: 'import', authorId: uid, authorName: nick, mine: true,
+          reviewNote: '', createdAt: now, updatedAt: now, publishedAt: now
         }));
       });
     }
@@ -195,7 +184,7 @@
     setSync('busy');
     function step() {
       if (!state.outbox.length) {
-        // 送るものがなくなったら、サーバーの最新状態(承認の結果など)で端末の表示を置き換える
+        // 送るものがなくなったら、サーバーの最新状態(他の人が作った症例など)で端末の表示を置き換える
         return withIdentity(function () { return api('getData'); }).then(function (data) {
           // 取得の最中に新しい操作が積まれていたら、その操作が消えないよう置き換えない(直後の再送で反映される)
           if (!state.outbox.length) {

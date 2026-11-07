@@ -127,30 +127,24 @@
   // 症例
   // =====================================================================
   var cf = { f: 'all' };
-  function statusChip(c) { return '<span class="tag st-' + c.status + '">' + esc(SD.STATUS[c.status] || c.status) + '</span>'; }
-  function canEdit(c) { return c.source !== 'sample' && (App.isAdmin() || (c.mine && c.status !== 'approved')); }
-  function canDelete(c) { return c.source !== 'sample' && (App.isAdmin() || (c.mine && c.status !== 'approved')); }
+  // 編集・削除は作った本人だけ(サンプルは不可)。他の人の症例は複製して自分の症例にする
+  function canEdit(c) { return c.source !== 'sample' && !!c.mine; }
+  function canDelete(c) { return c.source !== 'sample' && !!c.mine; }
   function exportShape(c) {
     var n = SD.normalizeCase(c); delete n.id; return n;
   }
 
   App.views.cases = function () {
     var all = App.allCases().filter(function (c) { return c.source !== 'sample'; });
-    var pending = all.filter(function (c) { return c.status === 'review'; });
-    var list = all.filter(function (c) {
-      if (cf.f === 'mine') return c.mine;
-      if (cf.f === 'all') return true;
-      return c.status === cf.f;
-    }).sort(function (a, b) { return (b.updatedAt || '') < (a.updatedAt || '') ? -1 : 1; });
+    var list = all.filter(function (c) { return cf.f === 'mine' ? c.mine : true; }).sort(function (a, b) { return (b.updatedAt || '') < (a.updatedAt || '') ? -1 : 1; });
     return head('症例') +
       '<div class="notice warn">' + PII_NOTE + '</div>' +
       '<div class="two"><button class="btn" data-act="case-new">＋ 新しい症例</button><button class="btn sec" data-act="case-import">JSON取込</button></div>' +
-      (App.isAdmin() && pending.length ? '<div class="hint">承認待ちが <b>' + pending.length + '件</b> あります。<button class="linkbtn" data-act="cf" data-v="review">見る</button></div>' : '') +
-      seg('cf', cf.f, [['all', 'すべて'], ['mine', '自分の'], ['draft', '下書き'], ['review', 'レビュー待ち'], ['approved', '承認済み']]) +
+      seg('cf', cf.f, [['all', 'すべて'], ['mine', '自分が作った']]) +
       '<h2>' + list.length + '本</h2>' +
       (list.length ? list.map(function (c) {
-        return '<button class="sc" data-act="case-open" data-id="' + esc(c.id) + '"><span>' + statusChip(c) + (c.tag ? '<span class="tag">' + esc(c.tag) + '</span>' : '') + '<span class="tag d' + c.difficulty + '">' + esc(SD.DIFFICULTY[c.difficulty]) + '</span></span><b>' + esc(c.title) + '</b>' +
-          '<small>' + c.stages.length + '場面・' + esc(c.authorName || '') + '・第' + (c.version || 1) + '版' + (c.reviewNote ? '・差し戻しあり' : '') + '</small></button>';
+        return '<button class="sc" data-act="case-open" data-id="' + esc(c.id) + '"><span>' + (c.tag ? '<span class="tag">' + esc(c.tag) + '</span>' : '') + '<span class="tag d' + c.difficulty + '">' + esc(SD.DIFFICULTY[c.difficulty]) + '</span></span><b>' + esc(c.title) + '</b>' +
+          '<small>' + c.stages.length + '場面・' + esc(c.authorName || '') + '・第' + (c.version || 1) + '版' + (c.mine ? '・自分' : '') + '</small></button>';
       }).join('') : '<div class="empty">症例がありません。「＋ 新しい症例」から作成するか、JSONを取り込みます。<br>同梱のサンプル3本はホームから訓練できます。</div>') +
       '<div class="two"><button class="btn sec" data-act="case-export"' + (list.length ? '' : ' disabled') + '>表示中をJSON書出</button><button class="btn sec" data-act="case-sample">サンプルを複製</button></div>' +
       '<p class="note">JSONは「options の先頭が正解」の形式です。プロトタイプの形式もそのまま取り込めます。</p>';
@@ -161,25 +155,21 @@
   function openCase(id) {
     var c = App.findCase(id);
     if (!c) return;
-    var n = SD.normalizeCase(c), hints = SD.reviewHints(n), pii = SD.casePII(n), admin = App.isAdmin();
+    var n = SD.normalizeCase(c), hints = SD.reviewHints(n), pii = SD.casePII(n);
     var btns = '';
-    if (c.status === 'approved') btns += '<button class="btn" data-act="case-train" data-id="' + esc(c.id) + '">この症例で訓練</button>';
-    else btns += '<button class="btn sec" data-act="case-train" data-id="' + esc(c.id) + '">試しに訓練(未承認)</button>';
+    btns += '<button class="btn" data-act="case-train" data-id="' + esc(c.id) + '">この症例で訓練</button>';
     if (canEdit(c)) btns += '<button class="btn sec" data-act="case-edit" data-id="' + esc(c.id) + '">編集</button>';
-    if ((c.mine || admin) && c.status === 'draft' && c.source !== 'sample') btns += '<button class="btn" data-act="case-submit" data-id="' + esc(c.id) + '">レビューに出す</button>';
-    if (admin && c.status === 'review') btns += '<div class="two"><button class="btn good" data-act="case-approve" data-id="' + esc(c.id) + '">承認して公開</button><button class="btn sec" data-act="case-reject" data-id="' + esc(c.id) + '">差し戻し</button></div>';
-    if (admin && c.status === 'approved' && c.source !== 'sample') btns += '<button class="btn sec" data-act="case-unpublish" data-id="' + esc(c.id) + '">公開を取り下げ</button>';
     btns += '<button class="btn sec" data-act="case-dup" data-id="' + esc(c.id) + '">複製して派生症例を作る</button>';
     btns += '<button class="btn sec" data-act="case-export-one" data-id="' + esc(c.id) + '">この症例のJSON</button>';
     if (canDelete(c)) btns += '<button class="btn danger" data-act="case-delete" data-id="' + esc(c.id) + '">削除</button>';
     App.openLayer('<div class="topbar"><button class="ghost" data-act="close-layer">‹ もどる</button></div>' +
-      '<div>' + statusChip(c) + (c.tag ? '<span class="tag">' + esc(c.tag) + '</span>' : '') + '<span class="tag d' + c.difficulty + '">' + esc(SD.DIFFICULTY[c.difficulty]) + '</span></div>' +
+      '<div>' + (c.tag ? '<span class="tag">' + esc(c.tag) + '</span>' : '') + '<span class="tag d' + c.difficulty + '">' + esc(SD.DIFFICULTY[c.difficulty]) + '</span></div>' +
       '<h1>' + esc(c.title) + '</h1>' +
       '<p class="sub">' + esc([c.age, c.sex, c.chief_complaint].filter(Boolean).join('・')) + (c.protocol_refs && c.protocol_refs.length ? '<br>プロトコール項番: ' + esc(c.protocol_refs.join(', ')) : '') + '<br>作成: ' + esc(c.authorName || '—') + '・第' + (c.version || 1) + '版</p>' +
-      (c.reviewNote && c.status === 'draft' ? '<div class="hint ng">差し戻しコメント: ' + esc(c.reviewNote) + '</div>' : '') +
       (c.needs_review ? '<div class="hint">要確認: ' + esc(c.review_note || 'プロトコールとの照合が必要です') + '</div>' : '') +
       (pii.length ? '<div class="hint ng">個人情報かもしれない記述があります: ' + esc(pii.join('、')) + '</div>' : '') +
       (hints.length ? '<details class="hints"><summary>見直しの目安(' + hints.length + '件)</summary>' + hints.map(function (h) { return '<div>' + esc(h) + '</div>'; }).join('') + '</details>' : '') +
+      (c.mine ? '' : '<p class="note">' + esc(c.authorName || '他の人') + 'さんの症例です。直したいときは「複製」して自分の症例にします。</p>') +
       '<div class="actions">' + btns + '</div>' +
       '<h2>場面</h2>' + n.stages.map(function (g, i) {
         return '<details class="stg"><summary>' + (i + 1) + '. ' + esc(g.name) + '</summary>' +
@@ -192,30 +182,6 @@
   A['case-open'] = function (el) { openCase(el.dataset.id); };
   A['close-layer'] = function () { ed = null; App.closeLayer(); };
   A['case-train'] = function (el) { var c = App.findCase(el.dataset.id); if (c) { App.closeLayer(); state.tab = 'home'; App.startCase(c); } };
-  A['case-submit'] = function (el) {
-    var c = App.findCase(el.dataset.id), n = SD.normalizeCase(c);
-    var pii = SD.casePII(n), hints = SD.reviewHints(n);
-    if (pii.length && !confirm('個人情報かもしれない記述があります(' + pii.join('、') + ')。確認してから出してください。このまま出しますか?')) return;
-    if (hints.length && !confirm('見直しの目安が' + hints.length + '件あります:\n・' + hints.slice(0, 5).join('\n・') + '\nこのままレビューに出しますか?')) return;
-    App.closeLayer();
-    App.mutate('saveCase', { case: caseForSave(c), submit: true });
-    App.toast('レビューに出しました');
-  };
-  A['case-approve'] = function (el) {
-    if (!confirm('この症例を承認して公開します。プロトコールとの照合は済んでいますか?')) return;
-    App.closeLayer(); App.mutate('reviewCase', { id: el.dataset.id, decision: 'approve' }); App.toast('承認しました');
-  };
-  A['case-reject'] = function (el) {
-    var note = prompt('差し戻しのコメント(必須・500文字まで)');
-    if (note == null) return;
-    note = note.trim();
-    if (!note) { App.toast('コメントを入力してください', true); return; }
-    App.closeLayer(); App.mutate('reviewCase', { id: el.dataset.id, decision: 'reject', note: note.slice(0, 500) }); App.toast('差し戻しました');
-  };
-  A['case-unpublish'] = function (el) {
-    var note = prompt('取り下げの理由(任意)') || '';
-    App.closeLayer(); App.mutate('reviewCase', { id: el.dataset.id, decision: 'unpublish', note: note.slice(0, 500) }); App.toast('取り下げました');
-  };
   A['case-delete'] = function (el) {
     var c = App.findCase(el.dataset.id);
     if (!confirm('「' + c.title + '」を削除しますか?(元に戻せません)')) return;
@@ -229,7 +195,7 @@
   };
   A['case-export-one'] = function (el) { showJson([exportShape(App.findCase(el.dataset.id))], 'この症例のJSON'); };
   A['case-export'] = function () {
-    var list = App.allCases().filter(function (c) { return c.source !== 'sample' && (cf.f === 'all' || (cf.f === 'mine' ? c.mine : c.status === cf.f)); });
+    var list = App.allCases().filter(function (c) { return c.source !== 'sample' && (cf.f === 'mine' ? c.mine : true); });
     showJson(list.map(exportShape), '症例のJSON(' + list.length + '本)');
   };
   A['case-sample'] = function () {
@@ -259,9 +225,8 @@
   A['case-import'] = function () {
     App.openLayer('<div class="topbar"><button class="ghost" data-act="close-layer">‹ もどる</button></div><h1>JSON取込</h1>' +
       '<div class="notice warn">' + PII_NOTE + '</div>' +
-      '<p class="note">配列 [ … ] で貼り付けます。<b>options の先頭が正解</b>です(表示時に自動でシャッフル)。取り込んだ症例は「下書き」になります。</p>' +
+      '<p class="note">配列 [ … ] で貼り付けます。<b>options の先頭が正解</b>です(表示時に自動でシャッフル)。取り込んだ症例は、すぐに全員の訓練に出ます。</p>' +
       '<textarea id="jsonin" class="mono" spellcheck="false" placeholder="[ { &quot;title&quot;: …, &quot;stages&quot;: [ … ] } ]"></textarea>' +
-      (App.isAdmin() ? '<label class="check"><input type="checkbox" id="asApproved"> 承認済みとして取り込む(承認者のみ・初期データ用)</label>' : '') +
       '<div class="msg" id="msg"></div>' +
       '<div class="two"><button class="btn" data-act="import-do">取り込む</button><button class="btn sec" data-act="import-tpl">雛形を入れる</button></div>');
   };
@@ -276,11 +241,12 @@
     var norm = data.map(function (c) { var n = SD.normalizeCase(c); n.id = SD.newId('c'); return n; });
     var pii = []; norm.forEach(function (n) { SD.casePII(n).forEach(function (p) { if (pii.indexOf(p) < 0) pii.push(p); }); });
     if (pii.length && !confirm('個人情報かもしれない記述があります(' + pii.join('、') + ')。取り込みますか?')) return;
-    var approved = !!($('#asApproved') && $('#asApproved').checked);
-    for (var i = 0; i < norm.length; i += 30) App.mutate('importCases', { cases: norm.slice(i, i + 30), approved: approved });
+    var hintCount = 0; norm.forEach(function (n) { hintCount += SD.reviewHints(n).length; });
+    if (hintCount && !confirm('取り込むと、すぐに全員の訓練に出ます。見直しの目安が' + hintCount + '件あります(プロトコール根拠が空など)。取り込みますか?')) return;
+    for (var i = 0; i < norm.length; i += 30) App.mutate('importCases', { cases: norm.slice(i, i + 30) });
     App.closeLayer();
     cf.f = 'all';
-    App.toast(norm.length + '本を取り込みました' + (approved ? '(承認済み)' : '(下書き)'));
+    App.toast(norm.length + '本を取り込みました');
   };
 
   // ---- 作成・編集 ----
@@ -321,7 +287,8 @@
       c.stages.map(function (g, i) { return stageCard(g, i, c.stages.length); }).join('') +
       '<button class="btn sec" data-act="ed-add-stage"' + (c.stages.length >= SD.LIMITS.stages ? ' disabled' : '') + '>＋ 場面を追加</button>' +
       '<div class="msg" id="msg"></div>' +
-      '<div class="two sticky"><button class="btn sec" data-act="ed-save">下書き保存</button><button class="btn" data-act="ed-submit">レビューに出す</button></div>');
+      '<p class="note">保存すると、すぐに全員の訓練に出ます。</p>' +
+      '<div class="sticky"><button class="btn" data-act="ed-save">保存</button></div>');
     $('#layer').scrollTop = y;
   }
   function field(label, input) { return '<label class="field"><span>' + label + '</span>' + input + '</label>'; }
@@ -365,7 +332,7 @@
   A['ed-down'] = function (el) { var i = +el.dataset.s, a = ed.c.stages; if (i < a.length - 1) { var t = a[i]; a[i] = a[i + 1]; a[i + 1] = t; ed.open = {}; ed.open[i + 1] = true; renderEditor(); } };
   A['ed-add-opt'] = function (el) { var i = +el.dataset.s; ed.c.stages[i].options.push(''); ed.open[i] = true; renderEditor(); };
   A['ed-del-opt'] = function (el) { var i = +el.dataset.s; ed.c.stages[i].options.splice(+el.dataset.o, 1); ed.open[i] = true; renderEditor(); };
-  function saveEditor(submit) {
+  function saveEditor() {
     var c = ed.c, raw = JSON.parse(JSON.stringify(c));
     // 空の誤答欄は取り除く(正解欄が空ならエラーにする)
     raw.stages.forEach(function (g) { g.options = g.options.filter(function (o, k) { return k === 0 || String(o).trim(); }); });
@@ -374,18 +341,15 @@
     var n = SD.normalizeCase(raw); n.id = c.id;
     var pii = SD.casePII(n);
     if (pii.length && !confirm('個人情報かもしれない記述があります(' + pii.join('、') + ')。このまま保存しますか?')) return;
-    if (submit) {
-      var hints = SD.reviewHints(n);
-      if (hints.length && !confirm('見直しの目安が' + hints.length + '件あります:\n・' + hints.slice(0, 5).join('\n・') + '\nこのままレビューに出しますか?')) return;
-    }
+    var hints = SD.reviewHints(n);
+    if (hints.length && !confirm('保存すると、すぐに全員の訓練に出ます。見直しの目安が' + hints.length + '件あります:\n・' + hints.slice(0, 5).join('\n・') + '\nこのまま保存しますか?')) return;
     ed = null;
     App.closeLayer();
-    App.mutate('saveCase', { case: n, submit: !!submit });
+    App.mutate('saveCase', { case: n });
     cf.f = 'all';
-    App.toast(submit ? 'レビューに出しました' : '下書きを保存しました');
+    App.toast('保存しました');
   }
-  A['ed-save'] = function () { saveEditor(false); };
-  A['ed-submit'] = function () { saveEditor(true); };
+  A['ed-save'] = function () { saveEditor(); };
 
   // =====================================================================
   // 設定
@@ -396,12 +360,7 @@
       '<h2>利用者</h2><div class="card form">' +
         field('ニックネーム(症例の作成者として表示されます)', '<input class="input" id="nick" maxlength="20" value="' + esc(state.me ? state.me.nick : '') + '">') +
         '<button class="btn sec" data-act="nick-save">変更を保存</button>' +
-        '<p class="note">接続: ' + (demo ? 'デモ(この端末の中だけ)' : '共有データに接続中') + '。承認者: ' + (App.isAdmin() ? '<b>はい</b>' : 'いいえ') + '</p>' +
-      '</div>' +
-      '<h2>承認者の合言葉</h2><div class="card form">' +
-        '<p class="note">症例の承認・差し戻し・他人の症例の削除をする人だけが入力します。合言葉はこの端末にだけ保存されます。</p>' +
-        (demo ? '<p class="note">デモでは、すべての承認操作を試せます。</p>' : '<input class="input" id="adminkey" type="password" autocomplete="off" placeholder="' + (state.admin ? '設定済み(変更するときだけ入力)' : '合言葉') + '">' +
-        '<div class="two"><button class="btn sec" data-act="admin-save">設定する</button><button class="btn sec" data-act="admin-clear"' + (state.admin ? '' : ' disabled') + '>解除</button></div>') +
+        '<p class="note">接続: ' + (demo ? 'デモ(この端末の中だけ)' : '共有データに接続中') + '</p>' +
       '</div>' +
       '<h2>同期・端末の引き継ぎ</h2><div class="card form">' +
         (demo ? '<p class="note">デモのデータはこの端末の中だけに保存されます。</p>' : '<button class="btn sec" data-act="sync-now">今すぐ同期(未送信 ' + state.outbox.length + '件)</button>' +
@@ -412,9 +371,9 @@
         '<button class="btn danger" data-act="disconnect">' + (demo ? 'デモを終了' : '接続を解除(この端末のデータを消す)') + '</button></div>' +
       '<h2>このアプリについて</h2><div class="card note-card">' +
         '<p>訓練用のアプリです。実際の活動は、所属のMCプロトコールに従ってください。</p>' +
-        '<p>症例の医療内容は、人の目で確認してから承認します。AIが作った症例も同じです。</p>' +
+        '<p>保存した症例は、すぐに全員の訓練に出ます。医療内容は、所属のMCプロトコールで確かめてから保存してください。</p>' +
         '<p>' + PII_NOTE + '入力した内容は、接続コードを知る人が見られる共有データに保存されます。</p>' +
-        '<p>オフラインでは、同期済みの承認済み症例と、同梱のサンプルで訓練できます。プロトコール本文は端末に保存しません。</p>' +
+        '<p>オフラインでは、同期済みの症例と、同梱のサンプルで訓練できます。プロトコール本文は端末に保存しません。</p>' +
         '<p class="note">版: ' + (window.SD_VERSION || '') + '</p></div>';
   };
   A['nick-save'] = function () {
@@ -424,28 +383,6 @@
     App.save(App.LS.me, state.me);
     if (App.isDemo()) { App.toast('保存しました'); return; }
     App.register().then(function () { App.toast('保存しました'); return App.flush(); }, function (e) { App.toast(e.message, true); });
-  };
-  A['admin-save'] = function () {
-    var v = $('#adminkey').value.trim();
-    if (!v) { App.toast('合言葉を入力してください', true); return; }
-    var btn = $('[data-act=admin-save]');
-    if (btn) { btn.disabled = true; btn.textContent = '確認中…'; }
-    state.admin = v; App.save(App.LS.admin, v);
-    // 同期の結果ではなく、サーバーに直接問い合わせて判定する
-    App.fetchLatest().then(function (data) {
-      var ok = !!(data.me && data.me.admin);
-      if (!ok) { state.admin = ''; App.save(App.LS.admin, ''); }
-      App.render();
-      App.toast(ok ? '承認者として認識されました' : '合言葉が違うようです。「設定」シートの B3 をもう一度コピーしてください', !ok);
-    }, function (e) {
-      // 通信できなかっただけなら、合言葉は消さずに残す(つながったときに有効になる)
-      App.render();
-      App.toast(e.network ? 'つながりませんでした。合言葉は保存したので、電波のよい所で「今すぐ同期」を押してください' : e.message, true);
-    });
-  };
-  A['admin-clear'] = function () {
-    state.admin = ''; App.save(App.LS.admin, '');
-    App.flush().then(function () { App.render(); App.toast('解除しました'); });
   };
   A['sync-now'] = function () { App.flush().then(function () { if (state.sync === 'off') App.toast('つながりませんでした。あとで自動で送ります', true); else App.toast('同期しました'); }); };
   A.transfer = function () {
@@ -458,8 +395,8 @@
   A.disconnect = function () {
     var pending = state.outbox.length;
     if (!confirm((App.isDemo() ? 'デモのデータを消して終了しますか?' : '接続を解除し、この端末のデータを消します。' + (pending ? '\n未送信の操作が' + pending + '件あります(失われます)。' : '') + '\n引き継ぎコードを控えていないと、この履歴は戻せません。続けますか?'))) return;
-    ['conn', 'me', 'admin', 'data', 'outbox', 'demo'].forEach(function (k) { App.save(App.LS[k], null); });
-    state.conn = null; state.me = null; state.admin = ''; state.outbox = []; state.data = App.normalize(null);
+    ['conn', 'me', 'data', 'outbox', 'demo'].forEach(function (k) { App.save(App.LS[k], null); });
+    state.conn = null; state.me = null; state.outbox = []; state.data = App.normalize(null);
     App.go('home');
   };
 
@@ -509,8 +446,8 @@
     state.conn = { demo: true };
     state.me = { uid: 'demo_user_0000', tok: 'demo', nick: 'デモ' };
     App.save(App.LS.conn, state.conn); App.save(App.LS.me, state.me);
-    state.data = App.normalize(App.load(App.LS.demo, null) || { me: { uid: state.me.uid, nickname: 'デモ', admin: true }, cases: [], sessions: [] });
-    state.data.me = { uid: state.me.uid, nickname: 'デモ', admin: true };
+    state.data = App.normalize(App.load(App.LS.demo, null) || { me: { uid: state.me.uid, nickname: 'デモ' }, cases: [], sessions: [] });
+    state.data.me = { uid: state.me.uid, nickname: 'デモ' };
     App.persist();
     state.tab = 'home';
     App.render();

@@ -11,7 +11,6 @@
   var STAGE_NAMES = ['指令内容', '現場の状況', '接触時の状況', '初期評価', '状態の変化・バイタル・病院連絡', '活動方針', '現場出発タイミング', '車内活動', '引き継ぎ内容'];
   var TIME_CHOICES = [5, 10, 15, 20];
   var DIFFICULTY = { 1: '基本', 2: '応用', 3: '変化球' };
-  var STATUS = { draft: '下書き', review: 'レビュー待ち', approved: '承認済み' };
   var LIMITS = { title: 80, tag: 20, info: 600, q: 120, option: 300, why: 500, ref: 60, stages: 20, options: 6 };
 
   // ---------- 汎用 ----------
@@ -308,7 +307,7 @@
   }
 
   return {
-    STAGE_NAMES: STAGE_NAMES, TIME_CHOICES: TIME_CHOICES, DIFFICULTY: DIFFICULTY, STATUS: STATUS, LIMITS: LIMITS,
+    STAGE_NAMES: STAGE_NAMES, TIME_CHOICES: TIME_CHOICES, DIFFICULTY: DIFFICULTY, LIMITS: LIMITS,
     shuffle: shuffle, dateKey: dateKey, addDays: addDays, newId: newId,
     validateCases: validateCases, validateCase: validateCase, normalizeCase: normalizeCase, reviewHints: reviewHints,
     detectPII: detectPII, casePII: casePII,

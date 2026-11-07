@@ -29,7 +29,7 @@ description: 即時判断ドリルの画面(このリポジトリ)と API(gas-pr
 7. **報告する**: 変えた内容、新しい版番号、テスト結果、Actions の結果、PR の URL を短く日本語で。iPhone 実機で確かめてほしい点があれば添える。
 
 ## 守ること
-- `.clasprc.json`・接続コード・合言葉などの秘密情報はコミットしない
+- `.clasprc.json`・接続コードなどの秘密情報はコミットしない
 - `gas-projects` の他のプロジェクト(workout-menu、triage-system、grid-map)には触れない
 - 検証ルールを変えたら、画面の `logic.js`(`validateCase`)と API の `code.js`(`validateCase_`)の両方を直す(食い違うとテストが失敗する)
 - スプレッドシートの列は見出し名で読む。列の追加はよいが、列名の変更・削除はしない

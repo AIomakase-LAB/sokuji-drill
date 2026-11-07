@@ -64,9 +64,7 @@ code { font-size: 13px; background: var(--line); padding: 1px 5px; border-radius
 .tag.d1 { color: var(--ok); border-color: var(--ok); }
 .tag.d2 { color: #b7791f; border-color: #b7791f; }
 .tag.d3 { color: var(--ng); border-color: var(--ng); }
-.tag.gray, .tag.st-draft { color: var(--sub); border-color: var(--sub); }
-.tag.st-review { color: #b7791f; border-color: #b7791f; }
-.tag.st-approved { color: var(--ok); border-color: var(--ok); }
+.tag.gray { color: var(--sub); border-color: var(--sub); }
 
 .btn { display: block; width: 100%; margin: 14px 0 0; padding: 15px; min-height: 52px; border: 0; border-radius: 14px; background: var(--acc); color: var(--acc-ink); font-weight: 700; font-size: 17px; }
 .btn.sec { background: var(--card); color: var(--ink); border: 1.5px solid var(--line); }

@@ -1,1 +1,1 @@
-window.SD_VERSION = 'v0.1.1';
+window.SD_VERSION = 'v0.2.0';
